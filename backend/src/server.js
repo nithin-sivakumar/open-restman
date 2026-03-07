@@ -139,7 +139,7 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
 
     const contentType = response.headers.get("content-type") || "";
     let responseBody;
-    const buffer = await response.arrayBuffer();
+    const buffer = await response.buffer();
     const responseSize = buffer.length;
 
     const isText =
