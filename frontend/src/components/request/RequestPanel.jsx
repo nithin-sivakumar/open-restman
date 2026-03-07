@@ -1,14 +1,12 @@
 // src/components/request/RequestPanel.jsx
-import { useState, useRef } from "react";
-import { Send, Save, Copy, ChevronDown, Wifi } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Save } from "lucide-react";
 import {
   useTabStore,
   useEnvStore,
   useHistoryStore,
-  useUIStore,
 } from "../../store/index.js";
-import { sendProxyRequest } from "../../utils/api.js";
-import { historyApi } from "../../utils/api.js";
+import { sendProxyRequest, historyApi } from "../../utils/api.js";
 import {
   buildUrlWithParams,
   getStatusBg,
@@ -19,6 +17,7 @@ import MethodSelector from "./MethodSelector.jsx";
 import RequestTabs from "./RequestTabs.jsx";
 import ResponsePanel from "../response/ResponsePanel.jsx";
 import URLInput from "./URLInput.jsx";
+import SaveRequestModal from "../collections/SaveRequestModal.jsx";
 
 export default function RequestPanel({ tab }) {
   const { updateTab } = useTabStore();
@@ -26,9 +25,21 @@ export default function RequestPanel({ tab }) {
   const { addEntry } = useHistoryStore();
   const [splitPos, setSplitPos] = useState(45);
   const [dragging, setDragging] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
   const containerRef = useRef(null);
-  const startY = useRef(0);
-  const startPos = useRef(0);
+
+  // Ctrl+S handler
+  const handleKeyDown = useCallback((e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      e.preventDefault();
+      setShowSaveModal(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   if (!tab) return null;
 
@@ -39,13 +50,11 @@ export default function RequestPanel({ tab }) {
     const resolvedUrl = resolveVariables(
       buildUrlWithParams(tab.url, tab.params || []),
     );
-    console.log(resolvedUrl);
     const resolvedHeaders = (tab.headers || []).map((h) => ({
       ...h,
       value: resolveVariables(h.value),
     }));
 
-    // Add auth headers
     if (tab.auth?.type === "bearer" && tab.auth.token) {
       resolvedHeaders.push({
         key: "Authorization",
@@ -81,10 +90,8 @@ export default function RequestPanel({ tab }) {
         auth: tab.auth,
         params: tab.params,
       });
-
       updateTab(tab.id, { loading: false, response: result });
 
-      // Save to history
       const entry = {
         method: tab.method,
         url: resolvedUrl,
@@ -121,9 +128,6 @@ export default function RequestPanel({ tab }) {
   function onSplitMouseDown(e) {
     e.preventDefault();
     setDragging(true);
-    startY.current = e.clientY;
-    startPos.current = splitPos;
-
     function onMove(e) {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -172,6 +176,32 @@ export default function RequestPanel({ tab }) {
             onKeyDown={(e) => e.key === "Enter" && sendRequest()}
           />
         </div>
+
+        {/* Save button */}
+        <button
+          onClick={() => setShowSaveModal(true)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all relative"
+          style={{
+            background: tab.isDirty
+              ? "var(--accent-subtle)"
+              : "var(--bg-overlay)",
+            color: tab.isDirty ? "var(--accent)" : "var(--text-muted)",
+            border: tab.isDirty
+              ? "1px solid var(--accent)"
+              : "1px solid transparent",
+          }}
+          title="Save Request (Ctrl+S)"
+        >
+          <Save size={13} />
+          {tab.isDirty && (
+            <span
+              className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
+              style={{ background: "var(--accent)" }}
+            />
+          )}
+        </button>
+
+        {/* Send button */}
         <button
           onClick={sendRequest}
           disabled={tab.loading || !tab.url}
@@ -186,34 +216,29 @@ export default function RequestPanel({ tab }) {
           ) : (
             <Send size={14} />
           )}
-          <span>{tab.loading ? "Sending..." : "Send"}</span>
+          <span>{tab.loading ? "Sending…" : "Send"}</span>
         </button>
       </div>
 
       {/* Split pane */}
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* Request config */}
         <div
           style={{ height: `${splitPos}%`, minHeight: 0, overflow: "hidden" }}
         >
           <RequestTabs tab={tab} />
         </div>
-
-        {/* Drag handle */}
         <div
           onMouseDown={onSplitMouseDown}
-          className="shrink-0 cursor-row-resize flex items-center justify-center h-1.5 hover:bg-(--accent)/30 transition-colors group"
+          className="shrink-0 cursor-row-resize flex items-center justify-center h-1.5 transition-colors"
           style={{
             background: dragging ? "var(--accent)" : "var(--border-subtle)",
           }}
         >
           <div
-            className="w-8 h-0.5 rounded-full transition-colors"
+            className="w-8 h-0.5 rounded-full"
             style={{ background: dragging ? "var(--accent)" : "var(--border)" }}
           />
         </div>
-
-        {/* Response */}
         <div
           style={{
             height: `${100 - splitPos}%`,
@@ -224,6 +249,10 @@ export default function RequestPanel({ tab }) {
           <ResponsePanel tab={tab} />
         </div>
       </div>
+
+      {showSaveModal && (
+        <SaveRequestModal tab={tab} onClose={() => setShowSaveModal(false)} />
+      )}
     </div>
   );
 }

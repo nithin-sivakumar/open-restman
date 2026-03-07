@@ -7,8 +7,8 @@ const AUTH_TYPES = [
   { id: "bearer", label: "Bearer Token" },
   { id: "basic", label: "Basic Auth" },
   { id: "apikey", label: "API Key" },
-  { id: "oauth2", label: "OAuth 2.0" },
-  { id: "digest", label: "Digest Auth" },
+  // { id: "oauth2", label: "OAuth 2.0" },
+  // { id: "digest", label: "Digest Auth" },
 ];
 
 function Field({ label, value, onChange, type = "text", placeholder }) {

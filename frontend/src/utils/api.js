@@ -10,12 +10,46 @@ export const collectionsApi = {
   create: (data) => api.post("/collections", data).then((r) => r.data),
   update: (id, data) => api.put(`/collections/${id}`, data).then((r) => r.data),
   delete: (id) => api.delete(`/collections/${id}`).then((r) => r.data),
-  addRequest: (id, req) =>
-    api.post(`/collections/${id}/requests`, req).then((r) => r.data),
-  addFolder: (id, folder) =>
-    api.post(`/collections/${id}/folders`, folder).then((r) => r.data),
+
+  // Save entire tree (requests + folders) at once — used for DnD reorder
   saveTree: (id, data) =>
     api.put(`/collections/${id}/tree`, data).then((r) => r.data),
+
+  // Add request to root or a specific folder
+  addRequest: (id, request, folderId = null) =>
+    api
+      .post(`/collections/${id}/requests`, { request, folderId })
+      .then((r) => r.data),
+
+  // Update an existing saved request
+  updateRequest: (collectionId, requestId, updates) =>
+    api
+      .put(`/collections/${collectionId}/requests/${requestId}`, { updates })
+      .then((r) => r.data),
+
+  // Delete a request
+  deleteRequest: (collectionId, requestId) =>
+    api
+      .delete(`/collections/${collectionId}/requests/${requestId}`)
+      .then((r) => r.data),
+
+  // Add folder to root or a parent folder
+  addFolder: (id, folder, parentFolderId = null) =>
+    api
+      .post(`/collections/${id}/folders`, { folder, parentFolderId })
+      .then((r) => r.data),
+
+  // Update folder metadata
+  updateFolder: (collectionId, folderId, updates) =>
+    api
+      .put(`/collections/${collectionId}/folders/${folderId}`, updates)
+      .then((r) => r.data),
+
+  // Delete folder
+  deleteFolder: (collectionId, folderId) =>
+    api
+      .delete(`/collections/${collectionId}/folders/${folderId}`)
+      .then((r) => r.data),
 };
 
 // ─── Environments ─────────────────────────────────────────────────────────────

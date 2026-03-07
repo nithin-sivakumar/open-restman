@@ -1,3 +1,4 @@
+// src/store/index.js
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
@@ -20,21 +21,18 @@ export const useThemeStore = create(
           set({ currentThemeId: id });
         }
       },
-      addCustomTheme: (theme) => {
-        set((s) => ({ customThemes: [...s.customThemes, theme] }));
-      },
-      updateCustomTheme: (id, updates) => {
+      addCustomTheme: (theme) =>
+        set((s) => ({ customThemes: [...s.customThemes, theme] })),
+      updateCustomTheme: (id, updates) =>
         set((s) => ({
           customThemes: s.customThemes.map((t) =>
             t.id === id ? { ...t, ...updates } : t,
           ),
-        }));
-      },
-      deleteCustomTheme: (id) => {
+        })),
+      deleteCustomTheme: (id) =>
         set((s) => ({
           customThemes: s.customThemes.filter((t) => t.id !== id),
-        }));
-      },
+        })),
       getAllThemes: () => [...BUILT_IN_THEMES, ...get().customThemes],
     }),
     { name: "restman-theme" },
@@ -46,17 +44,22 @@ const newTab = (overrides = {}) => ({
   id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
   name: "New Request",
   customName: false,
-  type: "http", // 'http' | 'websocket'
+  type: "http",
   method: "GET",
   url: "",
   headers: [{ id: 1, key: "", value: "", enabled: true }],
   params: [{ id: 1, key: "", value: "", enabled: true }],
-  bodyType: "none", // none | json | text | xml | formdata | urlencoded | binary
+  bodyType: "none",
   body: "",
   formFields: [{ id: 1, key: "", value: "", type: "text", enabled: true }],
   auth: { type: "none" },
   response: null,
   loading: false,
+  // Collection tracking — set when a request is saved to a collection
+  collectionId: null,
+  requestId: null, // the request's id within the collection
+  folderId: null, // null = saved at root, string = inside a folder
+  isDirty: false, // true = unsaved changes
   ...overrides,
 });
 
@@ -78,17 +81,15 @@ export const useTabStore = create((set, get) => ({
   },
   openOrAddTab(tabData) {
     const { tabs, setActiveTab, addTab } = get();
-
-    // Find a match based on method and URL
     const existing = tabs.find(
-      (t) => t.url === tabData.url && t.method === tabData.method,
+      (t) =>
+        t.url === tabData.url &&
+        t.method === tabData.method &&
+        t.type == tabData.type &&
+        t.name == tabData.name,
     );
-
-    if (existing) {
-      setActiveTab(existing.id);
-    } else {
-      addTab(tabData);
-    }
+    if (existing) setActiveTab(existing.id);
+    else addTab(tabData);
   },
   closeTab(id) {
     set((s) => {
@@ -99,17 +100,13 @@ export const useTabStore = create((set, get) => ({
           : s.activeTabId;
       return { tabs: tabs.length ? tabs : [newTab()], activeTabId };
     });
-    // Fix: if no tabs left, re-init
     if (!get().tabs.length) {
       const tab = newTab();
       set({ tabs: [tab], activeTabId: tab.id });
     }
   },
   closeOthers(id) {
-    set((s) => ({
-      tabs: s.tabs.filter((t) => t.id === id),
-      activeTabId: id,
-    }));
+    set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), activeTabId: id }));
   },
   closeAll() {
     const tab = newTab();
@@ -120,7 +117,34 @@ export const useTabStore = create((set, get) => ({
   },
   updateTab(id, updates) {
     set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+      tabs: s.tabs.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              ...updates,
+              isDirty:
+                updates.isDirty !== undefined
+                  ? updates.isDirty
+                  : t.collectionId
+                    ? true
+                    : t.isDirty,
+            }
+          : t,
+      ),
+    }));
+  },
+  markTabSaved(id, { collectionId, requestId, folderId }) {
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === id
+          ? { ...t, collectionId, requestId, folderId, isDirty: false }
+          : t,
+      ),
+    }));
+  },
+  markTabClean(id) {
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, isDirty: false } : t)),
     }));
   },
   duplicateTab(id) {
@@ -131,6 +155,10 @@ export const useTabStore = create((set, get) => ({
       id: `tab-${Date.now()}`,
       name: "Copy of " + tab.name,
       response: null,
+      collectionId: null,
+      requestId: null,
+      folderId: null,
+      isDirty: false,
     };
     set((s) => ({ tabs: [...s.tabs, dup], activeTabId: dup.id }));
   },
@@ -165,31 +193,25 @@ export const useEnvStore = create(
           ...get().globalVariables,
           ...(env?.variables || []),
         ].filter((v) => v.enabled !== false);
-        return vars.reduce((acc, { key, value }) => {
-          return acc.replaceAll(`{{${key}}}`, value || "");
-        }, str);
+        return vars.reduce(
+          (acc, { key, value }) => acc.replaceAll(`{{${key}}}`, value || ""),
+          str,
+        );
       },
       unresolveVariables(str) {
         if (!str) return str;
-
         const env = get().getActiveEnv();
         const vars = [
           ...get().globalVariables,
           ...(env?.variables || []),
-        ].filter((v) => v.enabled !== false && v.value); // Only use enabled vars with actual values
-
-        // SORTING IS KEY: Sort by value length (Longest -> Shortest)
-        // This prevents 'https://' from being replaced by {{protocol}}
-        // before 'https://api.com' is replaced by {{base_url}}.
+        ].filter((v) => v.enabled !== false && v.value);
         const sortedVars = [...vars].sort(
           (a, b) => b.value.length - a.value.length,
         );
-
-        return sortedVars.reduce((acc, { key, value }) => {
-          // We use the literal 'value' string directly.
-          // .replaceAll() treats it as text, not a RegEx pattern.
-          return acc.replaceAll(value, `{{${key}}}`);
-        }, str);
+        return sortedVars.reduce(
+          (acc, { key, value }) => acc.replaceAll(value, `{{${key}}}`),
+          str,
+        );
       },
     }),
     {
@@ -200,7 +222,7 @@ export const useEnvStore = create(
 );
 
 // ─── Collection Store ─────────────────────────────────────────────────────────
-export const useCollectionStore = create((set) => ({
+export const useCollectionStore = create((set, get) => ({
   collections: [],
   loaded: false,
   setCollections: (c) => set({ collections: c, loaded: true }),
@@ -212,9 +234,8 @@ export const useCollectionStore = create((set) => ({
       ),
     })),
   removeCollection: (id) =>
-    set((s) => ({
-      collections: s.collections.filter((c) => c._id !== id),
-    })),
+    set((s) => ({ collections: s.collections.filter((c) => c._id !== id) })),
+  getCollection: (id) => get().collections.find((c) => c._id === id),
 }));
 
 // ─── History Store ────────────────────────────────────────────────────────────
@@ -233,9 +254,9 @@ export const useUIStore = create(
     (set) => ({
       sidebarWidth: 260,
       sidebarCollapsed: false,
-      activeSidebarTab: "collections", // collections | environments | history
-      responseTab: "body", // body | headers | cookies | timeline
-      requestTab: "params", // params | headers | body | auth | cookies
+      activeSidebarTab: "collections",
+      responseTab: "body",
+      requestTab: "params",
       setSidebarWidth: (w) => set({ sidebarWidth: w }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
       setActiveSidebarTab: (t) => set({ activeSidebarTab: t }),

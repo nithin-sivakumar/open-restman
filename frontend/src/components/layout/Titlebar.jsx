@@ -130,7 +130,7 @@ export default function Titlebar() {
                       className="text-[10px] mt-0.5"
                       style={{ color: "var(--text-muted)" }}
                     >
-                      REST, GraphQL, any API
+                      REST API
                     </p>
                   </div>
                 </button>
