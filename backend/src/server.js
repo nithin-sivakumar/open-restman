@@ -316,5 +316,5 @@ wss.on("connection", async (clientWs, req) => {
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-  console.log(`🚀 Open-RestMan backend running on http://localhost:${PORT}`);
+  console.log(`🚀 Open-RestMan running on http://localhost:${PORT}`);
 });
