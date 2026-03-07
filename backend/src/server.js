@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
-import mongoose from "mongoose";
 import dotenv from "dotenv";
 import multer from "multer";
 import fetch from "node-fetch";
@@ -10,9 +9,12 @@ import FormData from "form-data";
 import path from "path";
 import { fileURLToPath } from "url";
 
+import { getDbEngine } from "./db/config.js";
+import { initDb } from "./db/index.js";
 import collectionRoutes from "./routes/collections.js";
 import environmentRoutes from "./routes/environments.js";
 import historyRoutes from "./routes/history.js";
+import settingsRoutes from "./routes/settings.js";
 
 dotenv.config();
 
@@ -24,7 +26,6 @@ const __dirname = path.dirname(__filename);
 
 const frontendPath = path.join(__dirname, "../../frontend/dist");
 
-// WebSocket server for proxying WS connections
 const wss = new WebSocketServer({ noServer: true });
 
 app.use(cors({ origin: "*" }));
@@ -33,24 +34,33 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// MongoDB connection
-const MONGO_URI =
-  process.env.MONGO_URI || "mongodb://localhost:27017/open-restman";
-mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ MongoDB error:", err.message));
+// Init DB based on config
+const dbEngine = getDbEngine();
+
+if (dbEngine === "mongodb") {
+  const mongoose = await import("mongoose");
+  const MONGO_URI =
+    process.env.MONGO_URI || "mongodb://localhost:27017/open-restman";
+  mongoose.default
+    .connect(MONGO_URI)
+    .then(() => console.log("✅ MongoDB connected"))
+    .catch((err) => console.error("❌ MongoDB error:", err.message));
+}
+
+await initDb();
 
 // Routes
 app.use("/api/collections", collectionRoutes);
 app.use("/api/environments", environmentRoutes);
 app.use("/api/history", historyRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     version: "1.0.0",
+    dbEngine,
     timestamp: new Date().toISOString(),
   });
 });
@@ -58,10 +68,8 @@ app.get("/api/health", (req, res) => {
 // ─── HTTP Proxy ───────────────────────────────────────────────────────────────
 app.post("/api/proxy", upload.any(), async (req, res) => {
   const start = Date.now();
-
   try {
     const { url, method, headers: reqHeaders, body, bodyType } = req.body;
-
     if (!url) return res.status(400).json({ error: "URL is required" });
 
     const fetchOptions = {
@@ -70,7 +78,6 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
       redirect: "follow",
     };
 
-    // Parse and apply headers
     if (reqHeaders) {
       const parsedHeaders =
         typeof reqHeaders === "string" ? JSON.parse(reqHeaders) : reqHeaders;
@@ -79,18 +86,15 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
       });
     }
 
-    // Handle body types
     if (method !== "GET" && method !== "HEAD") {
       if (bodyType === "formdata" && req.files && req.files.length > 0) {
         const fd = new FormData();
-        // Add text fields
         if (req.body.formFields) {
           const fields = JSON.parse(req.body.formFields);
           fields.forEach(({ key, value }) => {
             if (key) fd.append(key, value || "");
           });
         }
-        // Add files
         req.files.forEach((file) => {
           fd.append(file.fieldname, file.buffer, {
             filename: file.originalname,
@@ -111,19 +115,16 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
       } else if (bodyType === "json" && body) {
         fetchOptions.body =
           typeof body === "string" ? body : JSON.stringify(body);
-        if (!fetchOptions.headers["Content-Type"]) {
+        if (!fetchOptions.headers["Content-Type"])
           fetchOptions.headers["Content-Type"] = "application/json";
-        }
       } else if (bodyType === "xml" && body) {
         fetchOptions.body = body;
-        if (!fetchOptions.headers["Content-Type"]) {
+        if (!fetchOptions.headers["Content-Type"])
           fetchOptions.headers["Content-Type"] = "application/xml";
-        }
       } else if (bodyType === "text" && body) {
         fetchOptions.body = body;
-        if (!fetchOptions.headers["Content-Type"]) {
+        if (!fetchOptions.headers["Content-Type"])
           fetchOptions.headers["Content-Type"] = "text/plain";
-        }
       } else if (bodyType === "binary" && req.files && req.files[0]) {
         fetchOptions.body = req.files[0].buffer;
       }
@@ -131,36 +132,15 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
 
     const response = await fetch(url, fetchOptions);
     const elapsed = Date.now() - start;
-
-    // Collect response headers
     const responseHeaders = {};
     response.headers.forEach((value, key) => {
       responseHeaders[key] = value;
     });
 
-    // Get response body
     const contentType = response.headers.get("content-type") || "";
     let responseBody;
-    let responseSize = 0;
-
-    const buffer = await response.buffer();
-    responseSize = buffer.length;
-
-    // if (contentType.includes("application/json")) {
-    //   try {
-    //     responseBody = JSON.parse(buffer.toString("utf-8"));
-    //   } catch {
-    //     responseBody = buffer.toString("utf-8");
-    //   }
-    // } else if (
-    //   contentType.includes("text/") ||
-    //   contentType.includes("application/xml") ||
-    //   contentType.includes("application/javascript")
-    // ) {
-    //   responseBody = buffer.toString("utf-8");
-    // } else {
-    //   responseBody = buffer.toString("base64");
-    // }
+    const buffer = await response.arrayBuffer();
+    const responseSize = buffer.length;
 
     const isText =
       contentType.includes("application/json") ||
@@ -169,8 +149,8 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
       contentType.includes("application/javascript") ||
       contentType.includes("application/x-ndjson") ||
       contentType.includes("application/ld+json") ||
-      contentType.includes("charset") || // anything with charset is text
-      contentType === ""; // unknown = try as text
+      contentType.includes("charset") ||
+      contentType === "";
 
     if (isText) {
       const text = buffer.toString("utf-8");
@@ -204,13 +184,11 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
 });
 
 app.use(express.static(frontendPath));
-
 app.get("/", (req, res) => {
   res.sendFile(path.join(frontendPath, "index.html"));
 });
 
 // ─── WebSocket Proxy ──────────────────────────────────────────────────────────
-// Clients connect here, we forward to target WS
 const wsConnections = new Map();
 
 server.on("upgrade", (req, socket, head) => {
@@ -239,18 +217,13 @@ wss.on("connection", async (clientWs, req) => {
 
   clientWs.send(JSON.stringify({ type: "connecting", target: targetUrl }));
 
-  let targetWs;
-  try {
-    const { WebSocket } = await import("ws").catch(() => ({ WebSocket: null }));
-    // Use dynamic import for ws
-    import("ws").then(({ default: WS }) => {
-      targetWs = new WS.WebSocket(targetUrl);
-
+  import("ws")
+    .then(({ default: WS }) => {
+      const targetWs = new WS.WebSocket(targetUrl);
       targetWs.on("open", () => {
         wsConnections.set(connectionId, { client: clientWs, target: targetWs });
         clientWs.send(JSON.stringify({ type: "connected", target: targetUrl }));
       });
-
       targetWs.on("message", (data) => {
         let message;
         try {
@@ -267,7 +240,6 @@ wss.on("connection", async (clientWs, req) => {
           }),
         );
       });
-
       targetWs.on("close", (code, reason) => {
         clientWs.send(
           JSON.stringify({
@@ -278,40 +250,38 @@ wss.on("connection", async (clientWs, req) => {
         );
         wsConnections.delete(connectionId);
       });
-
       targetWs.on("error", (err) => {
         clientWs.send(JSON.stringify({ type: "error", message: err.message }));
       });
+
+      clientWs.on("message", (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "send" && targetWs && targetWs.readyState === 1) {
+            targetWs.send(msg.data);
+            clientWs.send(
+              JSON.stringify({
+                type: "message",
+                direction: "outgoing",
+                data: msg.data,
+                timestamp: Date.now(),
+              }),
+            );
+          }
+        } catch {
+          if (targetWs && targetWs.readyState === 1)
+            targetWs.send(data.toString());
+        }
+      });
+
+      clientWs.on("close", () => {
+        if (targetWs) targetWs.close();
+        wsConnections.delete(connectionId);
+      });
+    })
+    .catch((err) => {
+      clientWs.send(JSON.stringify({ type: "error", message: err.message }));
     });
-  } catch (err) {
-    clientWs.send(JSON.stringify({ type: "error", message: err.message }));
-  }
-
-  clientWs.on("message", (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      if (msg.type === "send" && targetWs && targetWs.readyState === 1) {
-        targetWs.send(msg.data);
-        clientWs.send(
-          JSON.stringify({
-            type: "message",
-            direction: "outgoing",
-            data: msg.data,
-            timestamp: Date.now(),
-          }),
-        );
-      }
-    } catch {
-      if (targetWs && targetWs.readyState === 1) {
-        targetWs.send(data.toString());
-      }
-    }
-  });
-
-  clientWs.on("close", () => {
-    if (targetWs) targetWs.close();
-    wsConnections.delete(connectionId);
-  });
 });
 
 const PORT = process.env.PORT || 4000;

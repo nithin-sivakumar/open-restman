@@ -1,11 +1,11 @@
 import express from "express";
-import History from "../models/History.js";
+import { getDb } from "../db/index.js";
 
 const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const history = await History.find().sort({ createdAt: -1 }).limit(200);
+    const history = await getDb().history.findAll();
     res.json(history);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -14,8 +14,7 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const entry = new History(req.body);
-    await entry.save();
+    const entry = await getDb().history.create(req.body);
     res.status(201).json(entry);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -24,8 +23,8 @@ router.post("/", async (req, res) => {
 
 router.delete("/", async (req, res) => {
   try {
-    await History.deleteMany({});
-    res.json({ success: true });
+    const result = await getDb().history.deleteAll();
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -33,8 +32,8 @@ router.delete("/", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    await History.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
+    const result = await getDb().history.deleteOne(req.params.id);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
