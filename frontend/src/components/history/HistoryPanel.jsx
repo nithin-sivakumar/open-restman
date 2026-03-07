@@ -35,7 +35,6 @@ export default function HistoryPanel() {
       (h) => h.key !== "Authorization",
     );
     openOrAddTab({
-      name: entry.url,
       method: entry.method,
       url: unresolveVariables(entry.url), // Unresolve first!
       headers: filteredHeaders || [],
@@ -44,7 +43,7 @@ export default function HistoryPanel() {
       formFields: entry.request?.formFields,
       auth: entry.request?.auth,
       params: entry.request?.params,
-      name: entry.request?.name,
+      name: entry.request?.name || entry.url,
       customName: entry.request?.customName,
     });
   }
