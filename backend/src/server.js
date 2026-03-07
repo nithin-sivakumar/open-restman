@@ -7,6 +7,8 @@ import dotenv from "dotenv";
 import multer from "multer";
 import fetch from "node-fetch";
 import FormData from "form-data";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import collectionRoutes from "./routes/collections.js";
 import environmentRoutes from "./routes/environments.js";
@@ -16,6 +18,11 @@ dotenv.config();
 
 const app = express();
 const server = createServer(app);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const frontendPath = path.join(__dirname, "../../frontend/dist");
 
 // WebSocket server for proxying WS connections
 const wss = new WebSocketServer({ noServer: true });
@@ -194,6 +201,12 @@ app.post("/api/proxy", upload.any(), async (req, res) => {
       statusText: "Network Error",
     });
   }
+});
+
+app.use(express.static(frontendPath));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(frontendPath, "index.html"));
 });
 
 // ─── WebSocket Proxy ──────────────────────────────────────────────────────────
