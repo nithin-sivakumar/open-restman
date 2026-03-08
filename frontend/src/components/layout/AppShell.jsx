@@ -1,3 +1,4 @@
+// src/components/layout/AppShell.jsx
 import { useEffect, useRef, useState } from "react";
 import Titlebar from "./Titlebar.jsx";
 import Sidebar from "./Sidebar.jsx";
@@ -5,10 +6,27 @@ import MainArea from "./MainArea.jsx";
 import { useUIStore } from "../../store/index.js";
 
 export default function AppShell() {
-  const { sidebarWidth, sidebarCollapsed, setSidebarWidth } = useUIStore();
+  const {
+    sidebarWidth,
+    sidebarCollapsed,
+    setSidebarWidth,
+    setSidebarCollapsed,
+  } = useUIStore();
   const [dragging, setDragging] = useState(false);
   const startX = useRef(0);
   const startW = useRef(0);
+
+  // Bug fix #1: Ctrl+B toggles sidebar globally
+  useEffect(() => {
+    function onKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "b") {
+        e.preventDefault();
+        setSidebarCollapsed(!sidebarCollapsed);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sidebarCollapsed, setSidebarCollapsed]);
 
   function onMouseDown(e) {
     e.preventDefault();
@@ -50,7 +68,7 @@ export default function AppShell() {
             {/* Resize handle */}
             <div
               onMouseDown={onMouseDown}
-              className="w-0.75 shrink-0 cursor-col-resize hover:bg-(--accent) transition-colors duration-150"
+              className="w-0.75 shrink-0 cursor-col-resize transition-colors duration-150"
               style={{
                 background: dragging ? "var(--accent)" : "var(--border)",
               }}

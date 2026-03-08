@@ -40,7 +40,7 @@ export const useThemeStore = create(
 );
 
 // ─── Tab Store ────────────────────────────────────────────────────────────────
-const newTab = (overrides = {}) => ({
+export const newTab = (overrides = {}) => ({
   id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
   name: "New Request",
   customName: false,
@@ -55,20 +55,54 @@ const newTab = (overrides = {}) => ({
   auth: { type: "none" },
   response: null,
   loading: false,
-  // Collection tracking — set when a request is saved to a collection
   collectionId: null,
-  requestId: null, // the request's id within the collection
-  folderId: null, // null = saved at root, string = inside a folder
-  isDirty: false, // true = unsaved changes
+  requestId: null,
+  folderId: null,
+  isDirty: false,
   ...overrides,
 });
 
+const TABS_STORAGE_KEY = "restman-tabs-v2";
+
+function loadPersistedTabs() {
+  try {
+    const raw = localStorage.getItem(TABS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.tabs || !parsed.tabs.length) return null;
+    const tabs = parsed.tabs.map((t) => ({
+      ...t,
+      loading: false,
+      response: null,
+    }));
+    return { tabs, activeTabId: parsed.activeTabId };
+  } catch {
+    return null;
+  }
+}
+
+function saveTabsToPersist(tabs, activeTabId) {
+  try {
+    localStorage.setItem(
+      TABS_STORAGE_KEY,
+      JSON.stringify({ tabs, activeTabId }),
+    );
+  } catch {}
+}
+
+const persisted = loadPersistedTabs();
+const initialTabs = persisted?.tabs || [newTab()];
+const initialActiveTabId = persisted?.activeTabId || initialTabs[0]?.id || null;
+
 export const useTabStore = create((set, get) => ({
-  tabs: [newTab()],
-  activeTabId: null,
+  tabs: initialTabs,
+  activeTabId: initialActiveTabId,
   init() {
-    const first = get().tabs[0];
-    set({ activeTabId: first.id });
+    const { tabs, activeTabId } = get();
+    const validActiveId = tabs.find((t) => t.id === activeTabId)
+      ? activeTabId
+      : tabs[0]?.id || null;
+    set({ activeTabId: validActiveId });
   },
   getActiveTab() {
     const { tabs, activeTabId } = get();
@@ -76,20 +110,41 @@ export const useTabStore = create((set, get) => ({
   },
   addTab(overrides = {}) {
     const tab = newTab(overrides);
-    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
+    set((s) => {
+      const newTabs = [...s.tabs, tab];
+      saveTabsToPersist(newTabs, tab.id);
+      return { tabs: newTabs, activeTabId: tab.id };
+    });
     return tab.id;
   },
   openOrAddTab(tabData) {
     const { tabs, setActiveTab, addTab } = get();
-    const existing = tabs.find(
-      (t) =>
-        t.url === tabData.url &&
-        t.method === tabData.method &&
-        t.type == tabData.type &&
-        t.name == tabData.name,
-    );
-    if (existing) setActiveTab(existing.id);
-    else addTab(tabData);
+    // If request has a requestId, find existing tab for it
+    if (tabData.requestId) {
+      const existing = tabs.find(
+        (t) =>
+          t.requestId === tabData.requestId &&
+          t.collectionId === tabData.collectionId,
+      );
+      if (existing) {
+        setActiveTab(existing.id);
+        return;
+      }
+    } else {
+      // For unsaved, match by url+method+type+name
+      const byContent = tabs.find(
+        (t) =>
+          t.url === tabData.url &&
+          t.method === tabData.method &&
+          t.type === tabData.type &&
+          t.name === tabData.name,
+      );
+      if (byContent) {
+        setActiveTab(byContent.id);
+        return;
+      }
+    }
+    addTab(tabData);
   },
   closeTab(id) {
     set((s) => {
@@ -98,26 +153,30 @@ export const useTabStore = create((set, get) => ({
         s.activeTabId === id
           ? tabs[tabs.length - 1]?.id || null
           : s.activeTabId;
-      return { tabs: tabs.length ? tabs : [newTab()], activeTabId };
+      saveTabsToPersist(tabs, activeTabId);
+      return { tabs, activeTabId };
     });
-    if (!get().tabs.length) {
-      const tab = newTab();
-      set({ tabs: [tab], activeTabId: tab.id });
-    }
   },
   closeOthers(id) {
-    set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), activeTabId: id }));
+    set((s) => {
+      const tabs = s.tabs.filter((t) => t.id === id);
+      saveTabsToPersist(tabs, id);
+      return { tabs, activeTabId: id };
+    });
   },
   closeAll() {
-    const tab = newTab();
-    set({ tabs: [tab], activeTabId: tab.id });
+    saveTabsToPersist([], null);
+    set({ tabs: [], activeTabId: null });
   },
   setActiveTab(id) {
-    set({ activeTabId: id });
+    set((s) => {
+      saveTabsToPersist(s.tabs, id);
+      return { activeTabId: id };
+    });
   },
   updateTab(id, updates) {
-    set((s) => ({
-      tabs: s.tabs.map((t) =>
+    set((s) => {
+      const tabs = s.tabs.map((t) =>
         t.id === id
           ? {
               ...t,
@@ -130,22 +189,30 @@ export const useTabStore = create((set, get) => ({
                     : t.isDirty,
             }
           : t,
-      ),
-    }));
+      );
+      saveTabsToPersist(tabs, s.activeTabId);
+      return { tabs };
+    });
   },
   markTabSaved(id, { collectionId, requestId, folderId }) {
-    set((s) => ({
-      tabs: s.tabs.map((t) =>
+    set((s) => {
+      const tabs = s.tabs.map((t) =>
         t.id === id
           ? { ...t, collectionId, requestId, folderId, isDirty: false }
           : t,
-      ),
-    }));
+      );
+      saveTabsToPersist(tabs, s.activeTabId);
+      return { tabs };
+    });
   },
   markTabClean(id) {
-    set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, isDirty: false } : t)),
-    }));
+    set((s) => {
+      const tabs = s.tabs.map((t) =>
+        t.id === id ? { ...t, isDirty: false } : t,
+      );
+      saveTabsToPersist(tabs, s.activeTabId);
+      return { tabs };
+    });
   },
   duplicateTab(id) {
     const tab = get().tabs.find((t) => t.id === id);
@@ -160,14 +227,20 @@ export const useTabStore = create((set, get) => ({
       folderId: null,
       isDirty: false,
     };
-    set((s) => ({ tabs: [...s.tabs, dup], activeTabId: dup.id }));
+    set((s) => {
+      const tabs = [...s.tabs, dup];
+      saveTabsToPersist(tabs, dup.id);
+      return { tabs, activeTabId: dup.id };
+    });
   },
   renameTab(id, newName) {
-    set((s) => ({
-      tabs: s.tabs.map((t) =>
+    set((s) => {
+      const tabs = s.tabs.map((t) =>
         t.id === id ? { ...t, name: newName, customName: true } : t,
-      ),
-    }));
+      );
+      saveTabsToPersist(tabs, s.activeTabId);
+      return { tabs };
+    });
   },
 }));
 

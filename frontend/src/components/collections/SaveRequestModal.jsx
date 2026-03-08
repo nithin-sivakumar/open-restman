@@ -213,15 +213,41 @@ export default function SaveRequestModal({ tab, onClose }) {
 
       let updatedCollection;
 
-      if (tab.collectionId === selectedCollectionId && tab.requestId) {
-        // Already saved — update in place
-        updatedCollection = await collectionsApi.updateRequest(
-          selectedCollectionId,
-          tab.requestId,
-          { ...requestData, folderId: selectedFolderId },
+      if (tab.requestId) {
+        // Check if this request ID already exists in the target collection (dedup guard)
+        const targetCol = collections.find(
+          (c) => c._id === selectedCollectionId,
         );
+        const existsInTarget =
+          targetCol && requestExistsInCollection(targetCol, tab.requestId);
+
+        if (existsInTarget) {
+          // Update in place — prevents duplicate entries (bug #6)
+          updatedCollection = await collectionsApi.updateRequest(
+            selectedCollectionId,
+            tab.requestId,
+            { ...requestData, folderId: selectedFolderId },
+          );
+        } else {
+          // Moving to a new collection — remove from old if needed
+          if (tab.collectionId && tab.collectionId !== selectedCollectionId) {
+            const srcUpdated = await collectionsApi.deleteRequest(
+              tab.collectionId,
+              tab.requestId,
+            );
+            updateCollection(tab.collectionId, {
+              requests: srcUpdated.requests,
+              folders: srcUpdated.folders,
+            });
+          }
+          updatedCollection = await collectionsApi.addRequest(
+            selectedCollectionId,
+            requestData,
+            selectedFolderId,
+          );
+        }
       } else {
-        // New save
+        // Brand new save — no requestId yet
         updatedCollection = await collectionsApi.addRequest(
           selectedCollectionId,
           requestData,
@@ -768,4 +794,20 @@ function countAllRequests(folders) {
     count += countAllRequests(f.folders || []);
   }
   return count;
+}
+
+function requestExistsInCollection(col, requestId) {
+  if ((col.requests || []).some((r) => r.id === requestId)) return true;
+  for (const f of col.folders || []) {
+    if (requestExistsInFolder(f, requestId)) return true;
+  }
+  return false;
+}
+
+function requestExistsInFolder(folder, requestId) {
+  if ((folder.requests || []).some((r) => r.id === requestId)) return true;
+  for (const f of folder.folders || []) {
+    if (requestExistsInFolder(f, requestId)) return true;
+  }
+  return false;
 }

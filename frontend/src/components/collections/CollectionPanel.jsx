@@ -15,16 +15,13 @@ import {
   Copy,
   MoveRight,
   Palette,
-  Tag,
   Check,
   X,
 } from "lucide-react";
 import { useCollectionStore, useTabStore } from "../../store/index.js";
 import { collectionsApi } from "../../utils/api.js";
-import { generateId, getMethodColor } from "../../utils/helpers.js";
+import { generateId } from "../../utils/helpers.js";
 import Portal from "../ui/Portal.jsx";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
 
 const PRESET_COLORS = [
   "#6366f1",
@@ -40,7 +37,6 @@ const PRESET_COLORS = [
   "#a855f7",
   "#06b6d4",
 ];
-
 const METHOD_TEXT_COLORS = {
   GET: "text-emerald-400",
   POST: "text-blue-400",
@@ -51,7 +47,9 @@ const METHOD_TEXT_COLORS = {
   OPTIONS: "text-pink-400",
 };
 
-// ── Context Menu ──────────────────────────────────────────────────────────────
+// ── Drag-and-Drop context ──────────────────────────────────────────────────────
+// We use a module-level ref so drag state is shared across all nodes without re-renders
+let dragState = null; // { type: 'request'|'folder', item, collectionId, folderId }
 
 function CtxMenu({ x, y, items, onClose }) {
   return (
@@ -106,8 +104,6 @@ function CtxMenu({ x, y, items, onClose }) {
     </Portal>
   );
 }
-
-// ── Color Picker Popover ──────────────────────────────────────────────────────
 
 function ColorPicker({ current, onChange, onClose, anchorRect }) {
   return (
@@ -165,8 +161,6 @@ function ColorPicker({ current, onChange, onClose, anchorRect }) {
   );
 }
 
-// ── Inline Rename Input ───────────────────────────────────────────────────────
-
 function InlineRename({ value, onSave, onCancel }) {
   const [val, setVal] = useState(value);
   return (
@@ -191,195 +185,39 @@ function InlineRename({ value, onSave, onCancel }) {
   );
 }
 
-// ── Move To Modal ─────────────────────────────────────────────────────────────
-
-function MovePicker({ item, itemType, sourceCollectionId, onClose }) {
-  const { collections, updateCollection } = useCollectionStore();
-  const [targetCollectionId, setTargetCollectionId] =
-    useState(sourceCollectionId);
-  const [targetFolderId, setTargetFolderId] = useState(null);
-  const [expanded, setExpanded] = useState({ [sourceCollectionId]: true });
-
-  async function handleMove() {
-    if (itemType === "request") {
-      // Remove from source, add to target
-      const srcUpdated = await collectionsApi.deleteRequest(
-        sourceCollectionId,
-        item.id,
-      );
-      updateCollection(sourceCollectionId, {
-        requests: srcUpdated.requests,
-        folders: srcUpdated.folders,
-      });
-      const dstUpdated = await collectionsApi.addRequest(
-        targetCollectionId,
-        item,
-        targetFolderId,
-      );
-      updateCollection(targetCollectionId, {
-        requests: dstUpdated.requests,
-        folders: dstUpdated.folders,
-      });
-    }
-    onClose();
-  }
-
+// ── Drop zone indicator ────────────────────────────────────────────────────────
+function DropZone({ onDrop, label }) {
+  const [over, setOver] = useState(false);
   return (
-    <Portal>
-      <div
-        className="fixed inset-0 flex items-center justify-center"
-        style={{
-          zIndex: 10010,
-          background: "rgba(0,0,0,0.5)",
-          backdropFilter: "blur(3px)",
-        }}
-        onMouseDown={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-      >
-        <div
-          className="w-80 rounded-2xl shadow-2xl overflow-hidden"
-          style={{
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border)",
-          }}
-        >
-          <div
-            className="flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: "1px solid var(--border)" }}
-          >
-            <span
-              className="text-sm font-semibold"
-              style={{ color: "var(--text-primary)" }}
-            >
-              Move to…
-            </span>
-            <button
-              onClick={onClose}
-              className="p-1 rounded"
-              style={{ color: "var(--text-muted)" }}
-            >
-              <X size={14} />
-            </button>
-          </div>
-          <div className="p-3 max-h-80 overflow-y-auto">
-            {collections.map((col) => (
-              <div key={col._id}>
-                <div
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors"
-                  style={{
-                    background:
-                      targetCollectionId === col._id && !targetFolderId
-                        ? "var(--accent-subtle)"
-                        : "transparent",
-                  }}
-                  onClick={() => {
-                    setTargetCollectionId(col._id);
-                    setTargetFolderId(null);
-                    setExpanded((s) => ({ ...s, [col._id]: true }));
-                  }}
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setExpanded((s) => ({ ...s, [col._id]: !s[col._id] }));
-                    }}
-                  >
-                    {expanded[col._id] ? (
-                      <ChevronDown
-                        size={11}
-                        style={{ color: "var(--text-muted)" }}
-                      />
-                    ) : (
-                      <ChevronRight
-                        size={11}
-                        style={{ color: "var(--text-muted)" }}
-                      />
-                    )}
-                  </button>
-                  <div
-                    className="w-4 h-4 rounded"
-                    style={{ background: col.color || "var(--accent)" }}
-                  />
-                  <span
-                    className="text-xs font-medium flex-1"
-                    style={{ color: "var(--text-primary)" }}
-                  >
-                    {col.name}
-                  </span>
-                  {targetCollectionId === col._id && !targetFolderId && (
-                    <Check size={11} style={{ color: "var(--accent)" }} />
-                  )}
-                </div>
-                {expanded[col._id] &&
-                  (col.folders || []).map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer ml-4 transition-colors"
-                      style={{
-                        background:
-                          targetFolderId === f.id
-                            ? "var(--accent-subtle)"
-                            : "transparent",
-                      }}
-                      onClick={() => {
-                        setTargetCollectionId(col._id);
-                        setTargetFolderId(f.id);
-                      }}
-                    >
-                      <Folder
-                        size={11}
-                        style={{ color: f.color || "var(--warning)" }}
-                      />
-                      <span
-                        className="text-xs flex-1"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
-                        {f.name}
-                      </span>
-                      {targetFolderId === f.id && (
-                        <Check size={11} style={{ color: "var(--accent)" }} />
-                      )}
-                    </div>
-                  ))}
-              </div>
-            ))}
-          </div>
-          <div
-            className="flex gap-2 px-4 py-3"
-            style={{ borderTop: "1px solid var(--border)" }}
-          >
-            <button
-              onClick={onClose}
-              className="flex-1 py-1.5 rounded-lg text-xs"
-              style={{
-                color: "var(--text-muted)",
-                background: "var(--bg-overlay)",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleMove}
-              className="flex-1 py-1.5 rounded-lg text-xs font-medium"
-              style={{ background: "var(--accent)", color: "white" }}
-            >
-              Move
-            </button>
-          </div>
-        </div>
-      </div>
-    </Portal>
+    <div
+      className="mx-2 my-0.5 px-3 py-1.5 rounded-lg border border-dashed text-[10px] text-center transition-all"
+      style={{
+        borderColor: over ? "var(--accent)" : "var(--border-subtle)",
+        background: over ? "var(--accent-subtle)" : "transparent",
+        color: over ? "var(--accent)" : "var(--text-muted)",
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        onDrop();
+      }}
+    >
+      {label || "Drop here"}
+    </div>
   );
 }
 
 // ── Request Node ──────────────────────────────────────────────────────────────
-
-function RequestNode({ request, collectionId, depth = 0, folderId, onOpen }) {
+function RequestNode({ request, collectionId, folderId, onOpen, onRefresh }) {
   const { updateCollection } = useCollectionStore();
   const [ctxMenu, setCtxMenu] = useState(null);
-  const [showMove, setShowMove] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
   function openCtx(e) {
     e.preventDefault();
@@ -429,6 +267,20 @@ function RequestNode({ request, collectionId, depth = 0, folderId, onOpen }) {
     });
   }
 
+  // Drag source
+  function onDragStart(e) {
+    dragState = { type: "request", item: request, collectionId, folderId };
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  // Drop target (reorder within same container handled by parent DropZone)
+  async function handleDropOnSelf(e) {
+    e.preventDefault();
+    setDragOver(false);
+    if (!dragState || dragState.item?.id === request.id) return;
+    await performDrop(collectionId, folderId, updateCollection);
+  }
+
   const methodColor =
     request.type === "websocket"
       ? "text-emerald-400"
@@ -438,7 +290,6 @@ function RequestNode({ request, collectionId, depth = 0, folderId, onOpen }) {
     { label: "Open", icon: Globe, action: onOpen },
     { label: "Rename", icon: Edit2, action: () => setRenaming(true) },
     { label: "Duplicate", icon: Copy, action: handleDuplicate },
-    { label: "Move to…", icon: MoveRight, action: () => setShowMove(true) },
     "---",
     { label: "Delete", icon: Trash2, action: handleDelete, danger: true },
   ];
@@ -446,19 +297,32 @@ function RequestNode({ request, collectionId, depth = 0, folderId, onOpen }) {
   return (
     <>
       <div
-        className="flex items-center gap-1.5 rounded-lg cursor-pointer group transition-colors ml-4"
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDropOnSelf}
+        className="flex items-center gap-1.5 rounded-lg cursor-pointer group transition-all ml-4"
         style={{
-          paddingLeft: `${8 + depth * 12}px`,
+          paddingLeft: 8,
           paddingRight: 4,
           paddingTop: 5,
           paddingBottom: 5,
+          background: dragOver ? "var(--accent-subtle)" : "transparent",
+          outline: dragOver ? "1px dashed var(--accent)" : "none",
         }}
         onClick={onOpen}
         onContextMenu={openCtx}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--bg-elevated)")
-        }
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        onMouseEnter={(e) => {
+          if (!dragOver)
+            e.currentTarget.style.background = "var(--bg-elevated)";
+        }}
+        onMouseLeave={(e) => {
+          if (!dragOver) e.currentTarget.style.background = "transparent";
+        }}
       >
         {request.type === "websocket" ? (
           <span className="text-[9px] font-bold shrink-0 text-emerald-400">
@@ -500,7 +364,6 @@ function RequestNode({ request, collectionId, depth = 0, folderId, onOpen }) {
           <MoreHorizontal size={11} />
         </button>
       </div>
-
       {ctxMenu && (
         <CtxMenu
           x={ctxMenu.x}
@@ -509,20 +372,63 @@ function RequestNode({ request, collectionId, depth = 0, folderId, onOpen }) {
           onClose={() => setCtxMenu(null)}
         />
       )}
-      {showMove && (
-        <MovePicker
-          item={request}
-          itemType="request"
-          sourceCollectionId={collectionId}
-          onClose={() => setShowMove(false)}
-        />
-      )}
     </>
   );
 }
 
-// ── Folder Node (recursive) ───────────────────────────────────────────────────
+// Shared drop handler — moves dragState item to target collection/folder
+async function performDrop(
+  targetCollectionId,
+  targetFolderId,
+  updateCollection,
+) {
+  if (!dragState) return;
+  const {
+    type,
+    item,
+    collectionId: srcColId,
+    folderId: srcFolderId,
+  } = dragState;
+  dragState = null;
 
+  if (type === "request") {
+    // Remove from source
+    const srcUpdated = await collectionsApi.deleteRequest(srcColId, item.id);
+    updateCollection(srcColId, {
+      requests: srcUpdated.requests,
+      folders: srcUpdated.folders,
+    });
+    // Add to target
+    const dstUpdated = await collectionsApi.addRequest(
+      targetCollectionId,
+      item,
+      targetFolderId,
+    );
+    updateCollection(targetCollectionId, {
+      requests: dstUpdated.requests,
+      folders: dstUpdated.folders,
+    });
+  } else if (type === "folder") {
+    // For folder moves — use saveTree approach: remove from source, add to target collection root
+    const srcData = await collectionsApi.deleteFolder(srcColId, item.id);
+    updateCollection(srcColId, {
+      requests: srcData.requests,
+      folders: srcData.folders,
+    });
+    // Re-add folder to target collection
+    const dstData = await collectionsApi.addFolder(
+      targetCollectionId,
+      item,
+      targetFolderId,
+    );
+    updateCollection(targetCollectionId, {
+      requests: dstData.requests,
+      folders: dstData.folders,
+    });
+  }
+}
+
+// ── Folder Node ───────────────────────────────────────────────────────────────
 function FolderNode({
   folder,
   collectionId,
@@ -534,10 +440,11 @@ function FolderNode({
   const [expanded, setExpanded] = useState(depth < 1);
   const [ctxMenu, setCtxMenu] = useState(null);
   const [renaming, setRenaming] = useState(false);
-  const [addingRequest, setAddingRequest] = useState(null); // 'http' | 'websocket' | null
+  const [addingRequest, setAddingRequest] = useState(null);
   const [addingSubfolder, setAddingSubfolder] = useState(false);
   const [newItemName, setNewItemName] = useState("");
-  const [colorPicker, setColorPicker] = useState(null); // anchor rect
+  const [colorPicker, setColorPicker] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
   const rowRef = useRef(null);
 
   function openCtx(e) {
@@ -617,7 +524,6 @@ function FolderNode({
   }
 
   async function handleDuplicate() {
-    // Deep-clone with new IDs
     function reId(f) {
       return {
         ...f,
@@ -638,10 +544,29 @@ function FolderNode({
     });
   }
 
-  const hasSubs = (folder.folders || []).length > 0;
-  const hasRequests = (folder.requests || []).length > 0;
-  const folderColor = folder.color || "var(--warning)";
+  // Drag source (folder)
+  function onDragStart(e) {
+    e.stopPropagation();
+    dragState = {
+      type: "folder",
+      item: folder,
+      collectionId,
+      folderId: parentFolderId,
+    };
+    e.dataTransfer.effectAllowed = "move";
+  }
 
+  // Drop onto this folder = move item into it
+  async function onDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (!dragState || dragState.item?.id === folder.id) return;
+    setExpanded(true);
+    await performDrop(collectionId, folder.id, updateCollection);
+  }
+
+  const folderColor = folder.color || "var(--warning)";
   const ctxItems = [
     {
       label: "Add HTTP Request",
@@ -689,22 +614,38 @@ function FolderNode({
 
   return (
     <div>
-      {/* Folder header */}
       <div
         ref={rowRef}
-        className="flex items-center gap-1.5 rounded-lg cursor-pointer group transition-colors"
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          e.stopPropagation();
+          setDragOver(false);
+        }}
+        onDrop={onDrop}
+        className="flex items-center gap-1.5 rounded-lg cursor-pointer group transition-all"
         style={{
           paddingLeft: `${8 + depth * 12}px`,
           paddingRight: 4,
           paddingTop: 5,
           paddingBottom: 5,
+          background: dragOver ? "var(--accent-subtle)" : "transparent",
+          outline: dragOver ? "1px dashed var(--accent)" : "none",
         }}
         onClick={() => setExpanded(!expanded)}
         onContextMenu={openCtx}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--bg-elevated)")
-        }
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        onMouseEnter={(e) => {
+          if (!dragOver)
+            e.currentTarget.style.background = "var(--bg-elevated)";
+        }}
+        onMouseLeave={(e) => {
+          if (!dragOver) e.currentTarget.style.background = "transparent";
+        }}
       >
         <button
           onClick={(e) => {
@@ -724,7 +665,6 @@ function FolderNode({
         ) : (
           <Folder size={13} style={{ color: folderColor }} />
         )}
-
         {renaming ? (
           <InlineRename
             value={folder.name}
@@ -777,7 +717,6 @@ function FolderNode({
         </div>
       </div>
 
-      {/* Expanded content */}
       {expanded && (
         <div
           style={{
@@ -785,7 +724,6 @@ function FolderNode({
             marginLeft: `${14 + depth * 12}px`,
           }}
         >
-          {/* Subfolders */}
           {(folder.folders || []).map((sub) => (
             <FolderNode
               key={sub.id}
@@ -796,18 +734,23 @@ function FolderNode({
               onOpenRequest={onOpenRequest}
             />
           ))}
-          {/* Requests */}
           {(folder.requests || []).map((req) => (
             <RequestNode
               key={req.id}
               request={req}
               collectionId={collectionId}
-              depth={0}
               folderId={folder.id}
               onOpen={() => onOpenRequest(req, folder.id)}
             />
           ))}
-          {!hasSubs && !hasRequests && !addingRequest && !addingSubfolder && (
+          {/* Drop zone for empty folder / bottom of folder */}
+          <DropZone
+            label="Drop request or folder here"
+            onDrop={() =>
+              performDrop(collectionId, folder.id, updateCollection)
+            }
+          />
+          {!folder.folders?.length && !folder.requests?.length && (
             <div
               className="px-3 py-1 text-[10px]"
               style={{ color: "var(--text-muted)" }}
@@ -815,7 +758,6 @@ function FolderNode({
               Empty folder
             </div>
           )}
-          {/* Inline add request */}
           {addingRequest && (
             <div className="px-2 py-1">
               <input
@@ -843,7 +785,6 @@ function FolderNode({
               />
             </div>
           )}
-          {/* Inline add subfolder */}
           {addingSubfolder && (
             <div className="px-2 py-1">
               <input
@@ -891,7 +832,6 @@ function FolderNode({
 }
 
 // ── Collection Node ───────────────────────────────────────────────────────────
-
 function CollectionNode({ collection, onOpenRequest }) {
   const { updateCollection, removeCollection } = useCollectionStore();
   const [expanded, setExpanded] = useState(false);
@@ -901,6 +841,7 @@ function CollectionNode({ collection, onOpenRequest }) {
   const [addingFolder, setAddingFolder] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [colorPicker, setColorPicker] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
   const rowRef = useRef(null);
 
   function openCtx(e) {
@@ -965,10 +906,16 @@ function CollectionNode({ collection, onOpenRequest }) {
     setExpanded(true);
   }
 
-  const hasFolders = (collection.folders || []).length > 0;
-  const hasRequests = (collection.requests || []).length > 0;
-  const colColor = collection.color || "var(--accent)";
+  // Drop onto collection root
+  async function onDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    if (!dragState) return;
+    setExpanded(true);
+    await performDrop(collection._id, null, updateCollection);
+  }
 
+  const colColor = collection.color || "var(--accent)";
   const ctxItems = [
     {
       label: "Add HTTP Request",
@@ -1015,16 +962,28 @@ function CollectionNode({ collection, onOpenRequest }) {
 
   return (
     <div>
-      {/* Header */}
       <div
         ref={rowRef}
-        className="flex items-center gap-1.5 px-2 py-2 cursor-pointer group transition-colors rounded-lg mx-1"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        className="flex items-center gap-1.5 px-2 py-2 cursor-pointer group transition-all rounded-lg mx-1"
+        style={{
+          background: dragOver ? "var(--accent-subtle)" : "transparent",
+          outline: dragOver ? "1px dashed var(--accent)" : "none",
+        }}
         onClick={() => setExpanded(!expanded)}
         onContextMenu={openCtx}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--bg-elevated)")
-        }
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        onMouseEnter={(e) => {
+          if (!dragOver)
+            e.currentTarget.style.background = "var(--bg-elevated)";
+        }}
+        onMouseLeave={(e) => {
+          if (!dragOver) e.currentTarget.style.background = "transparent";
+        }}
       >
         <button
           onClick={(e) => {
@@ -1044,7 +1003,6 @@ function CollectionNode({ collection, onOpenRequest }) {
         ) : (
           <Folder size={14} style={{ color: colColor }} />
         )}
-
         {renaming ? (
           <InlineRename
             value={collection.name}
@@ -1059,7 +1017,6 @@ function CollectionNode({ collection, onOpenRequest }) {
             {collection.name}
           </span>
         )}
-
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={(e) => {
@@ -1098,7 +1055,6 @@ function CollectionNode({ collection, onOpenRequest }) {
         </div>
       </div>
 
-      {/* Children */}
       {expanded && (
         <div
           className="ml-1"
@@ -1107,7 +1063,6 @@ function CollectionNode({ collection, onOpenRequest }) {
             marginLeft: 16,
           }}
         >
-          {/* Folders */}
           {(collection.folders || []).map((folder) => (
             <FolderNode
               key={folder.id}
@@ -1115,29 +1070,36 @@ function CollectionNode({ collection, onOpenRequest }) {
               collectionId={collection._id}
               depth={0}
               parentFolderId={null}
-              onOpenRequest={onOpenRequest}
+              onOpenRequest={(req, fid) =>
+                onOpenRequest(req, fid, collection._id)
+              }
             />
           ))}
-          {/* Root requests */}
           {(collection.requests || []).map((req) => (
             <RequestNode
               key={req.id}
               request={req}
               collectionId={collection._id}
-              depth={0}
               folderId={null}
-              onOpen={() => onOpenRequest(req, null)}
+              onOpen={() => onOpenRequest(req, null, collection._id)}
             />
           ))}
-          {!hasFolders && !hasRequests && !addingRequest && !addingFolder && (
-            <div
-              className="px-3 py-2 text-[10px]"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Empty collection
-            </div>
-          )}
-          {/* Inline add request */}
+          {/* Root-level drop zone */}
+          <DropZone
+            label="Drop here to move to root"
+            onDrop={() => performDrop(collection._id, null, updateCollection)}
+          />
+          {!collection.folders?.length &&
+            !collection.requests?.length &&
+            !addingRequest &&
+            !addingFolder && (
+              <div
+                className="px-3 py-2 text-[10px]"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Empty collection
+              </div>
+            )}
           {addingRequest && (
             <div className="px-2 py-1.5">
               <input
@@ -1165,7 +1127,6 @@ function CollectionNode({ collection, onOpenRequest }) {
               />
             </div>
           )}
-          {/* Inline add folder */}
           {addingFolder && (
             <div className="px-2 py-1.5">
               <input
@@ -1213,7 +1174,6 @@ function CollectionNode({ collection, onOpenRequest }) {
 }
 
 // ── Main Panel ────────────────────────────────────────────────────────────────
-
 export default function CollectionPanel() {
   const { collections, addCollection } = useCollectionStore();
   const { openOrAddTab } = useTabStore();
@@ -1232,7 +1192,7 @@ export default function CollectionPanel() {
     setCreating(false);
   }
 
-  function openRequest(req, folderId) {
+  function openRequest(req, folderId, collectionId) {
     openOrAddTab({
       name: req.name,
       method: req.method || "GET",
@@ -1259,16 +1219,15 @@ export default function CollectionPanel() {
       auth: req.auth || { type: "none" },
       type: req.type || "http",
       wsMessages: req.messages || [],
-      collectionId: null, // will be linked if user saves again
+      collectionId: collectionId || null,
       requestId: req.id,
-      folderId: folderId,
+      folderId,
       isDirty: false,
     });
   }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
       <div
         className="flex items-center justify-between px-3 py-2 shrink-0"
         style={{ borderBottom: "1px solid var(--border)" }}
@@ -1295,7 +1254,6 @@ export default function CollectionPanel() {
         </button>
       </div>
 
-      {/* New collection inline form */}
       {creating && (
         <div
           className="px-3 py-2 shrink-0"
@@ -1362,7 +1320,6 @@ export default function CollectionPanel() {
         </div>
       )}
 
-      {/* List */}
       <div className="flex-1 overflow-y-auto py-1">
         {collections.length === 0 && (
           <div className="flex flex-col items-center justify-center h-40 gap-2 px-4 text-center">

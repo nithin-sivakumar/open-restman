@@ -1,18 +1,17 @@
 // src/components/request/RequestPanel.jsx
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Save } from "lucide-react";
+import { Send, Save, Copy } from "lucide-react";
 import {
   useTabStore,
   useEnvStore,
   useHistoryStore,
 } from "../../store/index.js";
-import { sendProxyRequest, historyApi } from "../../utils/api.js";
 import {
-  buildUrlWithParams,
-  getStatusBg,
-  formatTime,
-  formatBytes,
-} from "../../utils/helpers.js";
+  sendProxyRequest,
+  historyApi,
+  collectionsApi,
+} from "../../utils/api.js";
+import { buildUrlWithParams, tabToCurl } from "../../utils/helpers.js";
 import MethodSelector from "./MethodSelector.jsx";
 import RequestTabs from "./RequestTabs.jsx";
 import ResponsePanel from "../response/ResponsePanel.jsx";
@@ -20,33 +19,87 @@ import URLInput from "./URLInput.jsx";
 import SaveRequestModal from "../collections/SaveRequestModal.jsx";
 
 export default function RequestPanel({ tab }) {
-  const { updateTab } = useTabStore();
+  const { updateTab, markTabSaved, renameTab } = useTabStore();
   const { resolveVariables } = useEnvStore();
   const { addEntry } = useHistoryStore();
   const [splitPos, setSplitPos] = useState(45);
   const [dragging, setDragging] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [quickSaving, setQuickSaving] = useState(false);
+  const [curlCopied, setCurlCopied] = useState(false);
+
+  function copyCurl() {
+    const curl = tabToCurl(tab);
+    navigator.clipboard.writeText(curl);
+    setCurlCopied(true);
+    setTimeout(() => setCurlCopied(false), 2000);
+  }
   const containerRef = useRef(null);
 
-  // Ctrl+S handler
-  const handleKeyDown = useCallback((e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-      e.preventDefault();
+  // Bug fix #3: smart save — bypass modal if already saved to a collection
+  const handleSave = useCallback(async () => {
+    if (!tab) return;
+    if (tab.collectionId && tab.requestId) {
+      // Already saved — update in place without showing modal
+      setQuickSaving(true);
+      try {
+        const requestData =
+          tab.type === "websocket"
+            ? {
+                id: tab.requestId,
+                name: tab.name,
+                type: "websocket",
+                url: tab.url || "",
+                messages: tab.wsMessages || "",
+              }
+            : {
+                id: tab.requestId,
+                name: tab.name,
+                method: tab.method,
+                url: tab.url || "",
+                headers: tab.headers || [],
+                params: tab.params || [],
+                bodyType: tab.bodyType || "none",
+                body: tab.body || "",
+                formFields: tab.formFields || [],
+                auth: tab.auth || { type: "none" },
+                type: tab.type || "http",
+              };
+        await collectionsApi.updateRequest(tab.collectionId, tab.requestId, {
+          ...requestData,
+          folderId: tab.folderId,
+        });
+        markTabSaved(tab.id, {
+          collectionId: tab.collectionId,
+          requestId: tab.requestId,
+          folderId: tab.folderId,
+        });
+      } catch (err) {
+        console.error("Quick save failed:", err);
+      } finally {
+        setQuickSaving(false);
+      }
+    } else {
       setShowSaveModal(true);
     }
-  }, []);
+  }, [tab, markTabSaved]);
 
   useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+    function onKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleSave]);
 
   if (!tab) return null;
 
   async function sendRequest() {
     if (!tab.url) return;
     updateTab(tab.id, { loading: true, response: null });
-
     const resolvedUrl = resolveVariables(
       buildUrlWithParams(tab.url, tab.params || []),
     );
@@ -62,10 +115,9 @@ export default function RequestPanel({ tab }) {
         enabled: true,
       });
     } else if (tab.auth?.type === "basic" && tab.auth.username) {
-      const encoded = btoa(`${tab.auth.username}:${tab.auth.password || ""}`);
       resolvedHeaders.push({
         key: "Authorization",
-        value: `Basic ${encoded}`,
+        value: `Basic ${btoa(`${tab.auth.username}:${tab.auth.password || ""}`)}`,
         enabled: true,
       });
     } else if (tab.auth?.type === "apikey" && tab.auth.key) {
@@ -90,31 +142,35 @@ export default function RequestPanel({ tab }) {
         auth: tab.auth,
         params: tab.params,
       });
-      updateTab(tab.id, { loading: false, response: result });
-
-      const entry = {
-        method: tab.method,
-        url: resolvedUrl,
-        status: result.status,
-        statusText: result.statusText,
-        time: result.time,
-        size: result.size,
-        request: {
-          url: resolvedUrl,
-          method: tab.method,
-          headers: resolvedHeaders,
-          body: resolveVariables(tab.body),
-          bodyType: tab.bodyType,
-          formFields: tab.formFields,
-          auth: tab.auth,
-          params: tab.params,
-          name: tab.name,
-          customName: tab.customName,
-        },
+      const newTimes = [...(tab.responseTimes || []), result.time].slice(-20); // keep last 20
+      updateTab(tab.id, {
+        loading: false,
         response: result,
-      };
+        responseTimes: newTimes,
+        isDirty: tab.isDirty,
+      });
       historyApi
-        .add(entry)
+        .add({
+          method: tab.method,
+          url: resolvedUrl,
+          status: result.status,
+          statusText: result.statusText,
+          time: result.time,
+          size: result.size,
+          request: {
+            url: resolvedUrl,
+            method: tab.method,
+            headers: resolvedHeaders,
+            body: resolveVariables(tab.body),
+            bodyType: tab.bodyType,
+            formFields: tab.formFields,
+            auth: tab.auth,
+            params: tab.params,
+            name: tab.name,
+            customName: tab.customName,
+          },
+          response: result,
+        })
         .then(addEntry)
         .catch(() => {});
     } catch (err) {
@@ -131,8 +187,12 @@ export default function RequestPanel({ tab }) {
     function onMove(e) {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const pct = ((e.clientY - rect.top) / rect.height) * 100;
-      setSplitPos(Math.min(80, Math.max(20, pct)));
+      setSplitPos(
+        Math.min(
+          80,
+          Math.max(20, ((e.clientY - rect.top) / rect.height) * 100),
+        ),
+      );
     }
     function onUp() {
       setDragging(false);
@@ -145,7 +205,6 @@ export default function RequestPanel({ tab }) {
 
   return (
     <div ref={containerRef} className="flex flex-col h-full min-h-0">
-      {/* URL bar */}
       <div
         className="flex items-center gap-2 px-3 py-2.5 shrink-0"
         style={{
@@ -177,9 +236,26 @@ export default function RequestPanel({ tab }) {
           />
         </div>
 
-        {/* Save button */}
+        {/* Copy as cURL */}
         <button
-          onClick={() => setShowSaveModal(true)}
+          onClick={copyCurl}
+          className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm transition-all"
+          style={{
+            color: curlCopied ? "var(--accent)" : "var(--text-muted)",
+            background: "var(--bg-overlay)",
+          }}
+          title="Copy as cURL"
+        >
+          <Copy size={13} />
+          <span className="text-xs hidden sm:inline">
+            {curlCopied ? "Copied!" : "cURL"}
+          </span>
+        </button>
+
+        {/* Save button — shows modal only for new/unsaved requests */}
+        <button
+          onClick={handleSave}
+          disabled={quickSaving}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all relative"
           style={{
             background: tab.isDirty
@@ -190,9 +266,13 @@ export default function RequestPanel({ tab }) {
               ? "1px solid var(--accent)"
               : "1px solid transparent",
           }}
-          title="Save Request (Ctrl+S)"
+          title={tab.collectionId ? "Save (Ctrl+S)" : "Save Request (Ctrl+S)"}
         >
-          <Save size={13} />
+          {quickSaving ? (
+            <div className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+          ) : (
+            <Save size={13} />
+          )}
           {tab.isDirty && (
             <span
               className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
@@ -201,7 +281,6 @@ export default function RequestPanel({ tab }) {
           )}
         </button>
 
-        {/* Send button */}
         <button
           onClick={sendRequest}
           disabled={tab.loading || !tab.url}
@@ -220,7 +299,6 @@ export default function RequestPanel({ tab }) {
         </button>
       </div>
 
-      {/* Split pane */}
       <div className="flex-1 min-h-0 flex flex-col">
         <div
           style={{ height: `${splitPos}%`, minHeight: 0, overflow: "hidden" }}

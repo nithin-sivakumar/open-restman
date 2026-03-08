@@ -8,11 +8,15 @@ import {
   Globe,
   Wifi,
   ChevronDown,
+  Search,
+  Terminal,
 } from "lucide-react";
 import { useUIStore, useTabStore } from "../../store/index.js";
 import EnvSelector from "../environment/EnvSelector.jsx";
 import SettingsModal from "../settings/SettingsModal.jsx";
 import Portal from "../ui/Portal.jsx";
+import CommandPalette from "../ui/CommandPalette.jsx";
+import CurlImportModal from "../ui/CurlImportModal.jsx";
 import { useDropdownPosition } from "../../hooks/useDropdownPosition.js";
 
 export default function Titlebar() {
@@ -20,14 +24,28 @@ export default function Titlebar() {
   const { addTab } = useTabStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showNewMenu, setShowNewMenu] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [showCurlImport, setShowCurlImport] = useState(false);
   const menuRef = useRef(null);
   const { pos, measure } = useDropdownPosition();
+
+  // Cmd+K / Ctrl+K opens command palette
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+      }
+      if (e.key === "Escape") setShowPalette(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   function newHttp() {
     addTab({ type: "http", method: "GET", name: "New Request" });
     setShowNewMenu(false);
   }
-
   function newWS() {
     addTab({ type: "websocket", name: "New WebSocket", method: "WS" });
     setShowNewMenu(false);
@@ -58,12 +76,12 @@ export default function Titlebar() {
           </span>
         </div>
 
-        {/* Sidebar toggle */}
+        {/* Sidebar toggle (Ctrl+B) */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="p-1.5 rounded-md transition-colors cursor-pointer"
           style={{ color: "var(--text-muted)" }}
-          title="Toggle Sidebar"
+          title="Toggle Sidebar (Ctrl+B)"
         >
           <PanelLeft size={16} />
         </button>
@@ -94,7 +112,7 @@ export default function Titlebar() {
                 onMouseDown={() => setShowNewMenu(false)}
               />
               <div
-                className="fixed rounded-xl overflow-hidden shadow-2xl w-48"
+                className="fixed rounded-xl overflow-hidden shadow-2xl w-52"
                 style={{
                   top: pos.top,
                   left: pos.left,
@@ -103,7 +121,6 @@ export default function Titlebar() {
                   border: "1px solid var(--border)",
                 }}
               >
-                {/* HTTP */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -134,16 +151,13 @@ export default function Titlebar() {
                     </p>
                   </div>
                 </button>
-
                 <div
                   style={{
-                    height: "1px",
+                    height: 1,
                     background: "var(--border-subtle)",
                     margin: "0 12px",
                   }}
                 />
-
-                {/* WebSocket */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -174,13 +188,93 @@ export default function Titlebar() {
                     </p>
                   </div>
                 </button>
+                <div
+                  style={{
+                    height: 1,
+                    background: "var(--border-subtle)",
+                    margin: "0 12px",
+                  }}
+                />
+                {/* cURL import */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCurlImport(true);
+                    setShowNewMenu(false);
+                  }}
+                  className="w-full flex items-start gap-3 px-3 py-2.5 transition-colors text-left"
+                  style={{ color: "var(--text-primary)" }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.background = "var(--bg-overlay)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.background = "transparent")
+                  }
+                >
+                  <div
+                    className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{ background: "rgba(245,158,11,0.12)" }}
+                  >
+                    <Terminal size={14} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold">Import cURL</p>
+                    <p
+                      className="text-[10px] mt-0.5"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      Paste a cURL command
+                    </p>
+                  </div>
+                </button>
               </div>
             </Portal>
           )}
         </div>
 
-        <div className="flex-1" />
+        <button
+          onClick={() => setShowCurlImport(true)}
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-colors"
+          style={{ color: "var(--text-muted)" }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.background = "var(--bg-overlay)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "transparent")
+          }
+          title="Import cURL"
+        >
+          <Terminal size={13} />
+          <span className="hidden sm:inline">Import cURL</span>
+        </button>
 
+        {/* Command Palette trigger */}
+        <button
+          onClick={() => setShowPalette(true)}
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-colors min-w-40 justify-between"
+          style={{
+            color: "var(--text-muted)",
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border)",
+          }}
+          title="Command Palette (Ctrl+K)"
+        >
+          <div className="flex items-center justify-center gap-2">
+            <Search size={12} />
+            <span className="hidden sm:inline">Search...</span>
+          </div>
+          <kbd
+            className="hidden sm:inline text-[10px] px-1 rounded"
+            style={{
+              background: "var(--bg-elevated)",
+              color: "var(--text-muted)",
+            }}
+          >
+            Ctrl+K
+          </kbd>
+        </button>
+
+        <div className="flex-1" />
         <EnvSelector />
 
         <button
@@ -194,6 +288,10 @@ export default function Titlebar() {
       </div>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showPalette && <CommandPalette onClose={() => setShowPalette(false)} />}
+      {showCurlImport && (
+        <CurlImportModal onClose={() => setShowCurlImport(false)} />
+      )}
     </>
   );
 }

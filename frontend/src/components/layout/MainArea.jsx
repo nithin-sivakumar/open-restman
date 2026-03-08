@@ -1,18 +1,18 @@
 // src/components/layout/MainArea.jsx
 import { useEffect, useState, useRef } from "react";
 import { X, Plus, Wifi, Globe, ChevronDown } from "lucide-react";
-import { useTabStore } from "../../store/index.js";
+import { useTabStore, newTab } from "../../store/index.js";
 import RequestPanel from "../request/RequestPanel.jsx";
 import WSPanel from "../websocket/WSPanel.jsx";
 import Portal from "../ui/Portal.jsx";
 import { useDropdownPosition } from "../../hooks/useDropdownPosition.js";
 import SaveRequestModal from "../collections/SaveRequestModal.jsx";
 
-function MenuOption({ label, onClick }) {
+function MenuOption({ label, onClick, danger }) {
   return (
     <button
-      className="w-full px-3 py-1.5 text-left text-xs cursor-pointer"
-      style={{ color: "var(--accent)" }}
+      className="w-full px-3 py-1.5 text-left text-xs cursor-pointer transition-colors"
+      style={{ color: danger ? "var(--error)" : "var(--text-secondary)" }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -55,7 +55,6 @@ export default function MainArea() {
     addTab({ type: "http", method: "GET", name: "New Request" });
     setShowMenu(false);
   }
-
   function newWS() {
     addTab({ type: "websocket", name: "New WebSocket", method: "WS" });
     setShowMenu(false);
@@ -83,12 +82,27 @@ export default function MainArea() {
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
               }}
-              onSave={(tab) => setSaveModalTab(tab)}
+              onSave={(t) => setSaveModalTab(t)}
             />
           ))}
+
+          {/* Bug fix #4: "New tab" placeholder when all tabs are closed */}
+          {tabs.length === 0 && (
+            <div className="flex items-center px-4 py-2">
+              <button
+                onClick={newHttp}
+                className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors"
+                style={{
+                  color: "var(--text-muted)",
+                  background: "var(--bg-overlay)",
+                }}
+              >
+                <Plus size={12} /> New Request
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* New tab dropdown */}
         <div
           ref={menuRef}
           className="shrink-0 px-2 flex items-center border-l"
@@ -190,7 +204,6 @@ export default function MainArea() {
         </div>
       </div>
 
-      {/* Tab right-click context menu */}
       {contextMenu && (
         <Portal>
           <div
@@ -247,6 +260,7 @@ export default function MainArea() {
             />
             <MenuOption
               label="Close All"
+              danger
               onClick={() => {
                 closeAll();
                 setContextMenu(null);
@@ -256,16 +270,53 @@ export default function MainArea() {
         </Portal>
       )}
 
-      {/* Content */}
+      {/* Content — show empty state when no tabs */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {activeTab?.type === "websocket" ? (
+        {tabs.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center h-full gap-4"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <div
+              className="w-14 h-14 rounded-2xl flex items-center justify-center"
+              style={{ background: "var(--bg-overlay)" }}
+            >
+              <Globe size={28} style={{ color: "var(--text-muted)" }} />
+            </div>
+            <p
+              className="text-sm font-medium"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              No open tabs
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={newHttp}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{ background: "var(--accent)", color: "white" }}
+              >
+                <Plus size={14} /> HTTP Request
+              </button>
+              <button
+                onClick={newWS}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{
+                  background: "var(--bg-overlay)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <Wifi size={14} /> WebSocket
+              </button>
+            </div>
+          </div>
+        ) : activeTab?.type === "websocket" ? (
           <WSPanel tab={activeTab} />
         ) : (
           <RequestPanel tab={activeTab} />
         )}
       </div>
 
-      {/* Save modal triggered from tab context menu */}
       {saveModalTab && (
         <SaveRequestModal
           tab={saveModalTab}
@@ -279,6 +330,7 @@ export default function MainArea() {
 function TabItem({ tab, active, onActivate, onClose, onContextMenu, onSave }) {
   const [isEditing, setIsEditing] = useState(false);
   const { renameTab } = useTabStore();
+  const isSaved = !!tab.collectionId;
 
   return (
     <div
@@ -299,30 +351,16 @@ function TabItem({ tab, active, onActivate, onClose, onContextMenu, onSave }) {
           : "2px solid transparent",
       }}
     >
-      {/* Method / WS badge */}
       {tab.type === "websocket" ? (
         <Wifi size={11} className="shrink-0 text-emerald-400" />
       ) : (
         <span
-          className={`text-[10px] font-bold shrink-0 ${
-            tab.method === "GET"
-              ? "text-emerald-400"
-              : tab.method === "POST"
-                ? "text-blue-400"
-                : tab.method === "PUT"
-                  ? "text-amber-400"
-                  : tab.method === "DELETE"
-                    ? "text-red-400"
-                    : tab.method === "PATCH"
-                      ? "text-purple-400"
-                      : "text-zinc-400"
-          }`}
+          className={`text-[10px] font-bold shrink-0 ${tab.method === "GET" ? "text-emerald-400" : tab.method === "POST" ? "text-blue-400" : tab.method === "PUT" ? "text-amber-400" : tab.method === "DELETE" ? "text-red-400" : tab.method === "PATCH" ? "text-purple-400" : "text-zinc-400"}`}
         >
           {tab.method || "GET"}
         </span>
       )}
 
-      {/* Name */}
       {isEditing ? (
         <input
           autoFocus
@@ -336,45 +374,39 @@ function TabItem({ tab, active, onActivate, onClose, onContextMenu, onSave }) {
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
+        // Bug fix #5: italic + dot for unsaved tabs (never saved to collection)
         <span
           onDoubleClick={() => setIsEditing(true)}
           className="text-xs truncate select-none flex-1 min-w-0"
           style={{
             color: active ? "var(--text-primary)" : "var(--text-secondary)",
+            fontStyle: !isSaved ? "italic" : "normal",
           }}
         >
           {tab.name || "New Request"}
         </span>
       )}
 
-      {/* Dirty indicator dot — shown when unsaved changes */}
-      {tab.isDirty && !active && (
+      {/* Unsaved changes dot */}
+      {tab.isDirty && (
         <span
           className="shrink-0 w-1.5 h-1.5 rounded-full"
           style={{ background: "var(--accent)" }}
         />
       )}
 
-      {/* Close button */}
       <button
         onClick={(e) => {
           e.stopPropagation();
           onClose();
         }}
-        className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-all relative"
+        className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-all"
         style={{ color: "var(--text-muted)" }}
         onMouseEnter={(e) =>
           (e.currentTarget.style.background = "var(--bg-overlay)")
         }
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
-        {/* Dot on close button when active and dirty */}
-        {tab.isDirty && active && (
-          <span
-            className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full pointer-events-none"
-            style={{ background: "var(--accent)" }}
-          />
-        )}
         <X size={11} />
       </button>
     </div>

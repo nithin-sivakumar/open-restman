@@ -9,6 +9,7 @@ import {
   formatBytes,
   prettifyJson,
 } from "../../utils/helpers.js";
+import ResponseTimingBar from "./ResponseTimingBar.jsx";
 
 export default function ResponsePanel({ tab }) {
   const { responseTab, setResponseTab } = useUIStore();
@@ -368,6 +369,8 @@ export default function ResponsePanel({ tab }) {
           </>
         )}
       </div>
+      {/* Response timing sparkline — show last N times for this tab */}
+      <ResponseTimingBar timings={tab?.responseTimes} />
     </div>
   );
 }

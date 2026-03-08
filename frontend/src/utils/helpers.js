@@ -118,3 +118,25 @@ export function parseUrlParams(url) {
     return [];
   }
 }
+
+// ─── cURL Export ──────────────────────────────────────────────────────────────
+export function tabToCurl(tab) {
+  if (!tab?.url) return "";
+  const parts = [`curl -X ${tab.method || "GET"}`];
+  (tab.headers || [])
+    .filter((h) => h.enabled && h.key)
+    .forEach((h) => {
+      parts.push(`  -H "${h.key}: ${h.value}"`);
+    });
+  if (tab.auth?.type === "bearer" && tab.auth.token) {
+    parts.push(`  -H "Authorization: Bearer ${tab.auth.token}"`);
+  } else if (tab.auth?.type === "basic" && tab.auth.username) {
+    parts.push(`  -u "${tab.auth.username}:${tab.auth.password || ""}"`);
+  }
+  if (tab.body && tab.bodyType !== "none") {
+    const escaped = tab.body.replace(/'/g, "'\\''");
+    parts.push(`  -d '${escaped}'`);
+  }
+  parts.push(`  "${tab.url}"`);
+  return parts.join(" \\\n");
+}
