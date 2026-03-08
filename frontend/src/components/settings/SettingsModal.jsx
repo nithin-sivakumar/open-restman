@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   X,
   Palette,
@@ -306,10 +306,22 @@ function AppearanceSettings() {
   const [filter, setFilter] = useState("all");
 
   const all = getAllThemes();
-  const filtered = all.filter((t) => filter === "all" || t.category === filter);
-  const darkThemes = filtered.filter((t) => t.category === "dark");
-  const lightThemes = filtered.filter((t) => t.category === "light");
-  const customThemesList = filtered.filter((t) => t.category === "custom");
+  const filtered = useMemo(
+    () => all.filter((t) => filter === "all" || t.category === filter),
+    [all, filter],
+  );
+  const darkThemes = useMemo(
+    () => filtered.filter((t) => t.category === "dark"),
+    [filtered],
+  );
+  const lightThemes = useMemo(
+    () => filtered.filter((t) => t.category === "light"),
+    [filtered],
+  );
+  const customThemesList = useMemo(
+    () => filtered.filter((t) => t.category === "custom"),
+    [filtered],
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -423,10 +435,11 @@ function ThemeCard({ theme, active, onSelect, onDelete }) {
   return (
     <div
       onClick={onSelect}
-      className="relative rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-105 group"
+      className="relative rounded-xl overflow-hidden cursor-pointer transition-transform hover:scale-105 group"
       style={{
         border: active ? `2px solid ${v["--accent"]}` : "2px solid transparent",
         boxShadow: active ? `0 0 12px ${v["--accent"]}40` : "none",
+        willChange: "transform",
       }}
     >
       <div
