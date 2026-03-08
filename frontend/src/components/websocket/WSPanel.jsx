@@ -1,12 +1,23 @@
 import { useState, useEffect, useRef } from "react";
-import { Send, Wifi, WifiOff, Trash2, ArrowDown, ArrowUp } from "lucide-react";
+import {
+  Send,
+  Wifi,
+  WifiOff,
+  Trash2,
+  ArrowDown,
+  ArrowUp,
+  Save,
+} from "lucide-react";
 import { useTabStore } from "../../store/index.js";
+import SaveRequestModal from "../collections/SaveRequestModal.jsx";
 
 export default function WSPanel({ tab }) {
   const { updateTab } = useTabStore();
   const [status, setStatus] = useState("disconnected"); // disconnected | connecting | connected
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [filter, setFilter] = useState("");
+  const [showSaveModal, setShowSaveModal] = useState(false);
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -19,18 +30,45 @@ export default function WSPanel({ tab }) {
   }, []);
 
   useEffect(() => {
+    if (tab.wsMessages) {
+      setMessages(tab.wsMessages);
+    }
+  }, [tab.id]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault(); // stop browser save page
+        setShowSaveModal(true); // open your save modal
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
   function connect() {
     if (!url) return;
+    if (status === "connecting" || status === "connected") return;
     setStatus("connecting");
-    setMessages((m) => [
-      ...m,
-      { type: "info", text: `Connecting to ${url}...`, ts: Date.now() },
-    ]);
+    setMessages((m) => {
+      const next = [
+        ...m,
+        { type: "info", text: `Connecting to ${url}...`, ts: Date.now() },
+      ];
+      updateTab(tab.id, { wsMessages: next });
+      return next;
+    });
 
     try {
+      wsRef.current?.close();
       const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws-proxy?target=${encodeURIComponent(url)}&id=${tab.id}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
@@ -44,59 +82,96 @@ export default function WSPanel({ tab }) {
           const msg = JSON.parse(e.data);
           if (msg.type === "connected") {
             setStatus("connected");
-            setMessages((m) => [
-              ...m,
-              { type: "info", text: "Connected ✓", ts: Date.now() },
-            ]);
+            setMessages((m) => {
+              const next = [
+                ...m,
+                { type: "info", text: "Connected ✓", ts: Date.now() },
+              ];
+              updateTab(tab.id, { wsMessages: next });
+              return next;
+            });
           } else if (msg.type === "connecting") {
-            setMessages((m) => [
-              ...m,
+            setMessages((m) => {
               {
-                type: "info",
-                text: msg.message || "Connecting...",
-                ts: Date.now(),
-              },
-            ]);
+                const next = [
+                  ...m,
+                  {
+                    type: "info",
+                    text: msg.message || "Connecting...",
+                    ts: Date.now(),
+                  },
+                ];
+                updateTab(tab.id, { wsMessages: next });
+                return next;
+              }
+            });
           } else if (msg.type === "message") {
-            setMessages((m) => [
-              ...m,
-              {
-                type: msg.direction === "outgoing" ? "outgoing" : "incoming",
-                text: msg.data,
-                ts: msg.timestamp || Date.now(),
-              },
-            ]);
+            let formatted = msg.data;
+
+            try {
+              formatted = JSON.stringify(JSON.parse(msg.data), null, 2);
+            } catch {}
+
+            setMessages((m) => {
+              const next = [
+                ...m,
+                {
+                  type: msg.direction === "outgoing" ? "outgoing" : "incoming",
+                  text: formatted,
+                  size: new Blob([msg.data]).size,
+                  ts: msg.timestamp || Date.now(),
+                },
+              ];
+
+              updateTab(tab.id, { wsMessages: next });
+              return next;
+            });
           } else if (msg.type === "disconnected") {
             setStatus("disconnected");
-            setMessages((m) => [
-              ...m,
-              {
-                type: "info",
-                text: `Disconnected (code: ${msg.code})`,
-                ts: Date.now(),
-              },
-            ]);
+            setMessages((m) => {
+              const next = [
+                ...m,
+                {
+                  type: "info",
+                  text: `Disconnected (code: ${msg.code})`,
+                  ts: Date.now(),
+                },
+              ];
+              updateTab(tab.id, { wsMessages: next });
+              return next;
+            });
           } else if (msg.type === "error") {
             setStatus("disconnected");
-            setMessages((m) => [
-              ...m,
-              { type: "error", text: msg.message, ts: Date.now() },
-            ]);
+            setMessages((m) => {
+              const next = [
+                ...m,
+                { type: "error", text: msg.message, ts: Date.now() },
+              ];
+              updateTab(tab.id, { wsMessages: next });
+              return next;
+            });
           }
         } catch {
-          setMessages((m) => [
-            ...m,
-            { type: "incoming", text: e.data, ts: Date.now() },
-          ]);
+          const text = typeof e.data === "string" ? e.data : "[binary message]";
+
+          setMessages((m) => {
+            const next = [...m, { type: "incoming", text, ts: Date.now() }];
+            updateTab(tab.id, { wsMessages: next });
+            return next;
+          });
         }
       };
 
       ws.onerror = () => {
         setStatus("disconnected");
-        setMessages((m) => [
-          ...m,
-          { type: "error", text: "WebSocket error occurred", ts: Date.now() },
-        ]);
+        setMessages((m) => {
+          const next = [
+            ...m,
+            { type: "error", text: "WebSocket error occurred", ts: Date.now() },
+          ];
+          updateTab(tab.id, { wsMessages: next });
+          return next;
+        });
       };
 
       ws.onclose = () => {
@@ -104,10 +179,14 @@ export default function WSPanel({ tab }) {
       };
     } catch (err) {
       setStatus("disconnected");
-      setMessages((m) => [
-        ...m,
-        { type: "error", text: err.message, ts: Date.now() },
-      ]);
+      setMessages((m) => {
+        const next = [
+          ...m,
+          { type: "error", text: err.message, ts: Date.now() },
+        ];
+        updateTab(tab.id, { wsMessages: next });
+        return next;
+      });
     }
   }
 
@@ -181,6 +260,18 @@ export default function WSPanel({ tab }) {
           />
         </div>
 
+        <button
+          onClick={() => setShowSaveModal(true)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-all"
+          style={{
+            background: "var(--bg-overlay)",
+            color: "var(--text-muted)",
+          }}
+          title="Save WebSocket Session"
+        >
+          <Save size={13} />
+        </button>
+
         {status === "disconnected" ? (
           <button
             onClick={connect}
@@ -207,6 +298,26 @@ export default function WSPanel({ tab }) {
         )}
       </div>
 
+      <div
+        className="px-3 py-2 flex items-center gap-2"
+        style={{
+          borderBottom: "1px solid var(--border)",
+          background: "var(--bg-surface)",
+        }}
+      >
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter messages..."
+          className="flex-1 px-2 py-1 text-xs rounded-md outline-none"
+          style={{
+            background: "var(--bg-input)",
+            border: "1px solid var(--border)",
+            color: "var(--text-primary)",
+          }}
+        />
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-auto p-3 flex flex-col gap-1.5 font-mono text-xs">
         {messages.length === 0 && (
@@ -221,52 +332,71 @@ export default function WSPanel({ tab }) {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex items-start gap-2 ${msg.type === "outgoing" ? "flex-row-reverse" : ""}`}
-          >
-            {msg.type === "incoming" && (
-              <ArrowDown size={12} className="shrink-0 mt-1 text-emerald-400" />
-            )}
-            {msg.type === "outgoing" && (
-              <ArrowUp size={12} className="shrink-0 mt-1 text-blue-400" />
-            )}
+        {messages
+          .filter((m) =>
+            filter ? m.text.toLowerCase().includes(filter.toLowerCase()) : true,
+          )
+          .map((msg, i) => (
             <div
-              className={`max-w-[80%] px-3 py-2 rounded-xl break-all leading-relaxed ${
-                msg.type === "outgoing"
-                  ? "rounded-tr-sm"
-                  : msg.type === "incoming"
-                    ? "rounded-tl-sm"
-                    : "rounded-lg w-full"
-              }`}
-              style={{
-                background:
-                  msg.type === "outgoing"
-                    ? "var(--accent-subtle)"
-                    : msg.type === "incoming"
-                      ? "var(--bg-elevated)"
-                      : msg.type === "error"
-                        ? "rgba(239,68,68,0.1)"
-                        : "var(--bg-surface)",
-                color:
-                  msg.type === "outgoing"
-                    ? "var(--accent)"
-                    : msg.type === "error"
-                      ? "var(--error)"
-                      : msg.type === "info"
-                        ? "var(--text-muted)"
-                        : "var(--text-primary)",
-                border: "1px solid var(--border-subtle)",
-              }}
+              key={i}
+              className={`flex items-start gap-2 ${msg.type === "outgoing" ? "flex-row-reverse" : ""}`}
             >
-              {msg.text}
-              <div className="text-[9px] mt-1 opacity-50">
-                {new Date(msg.ts).toLocaleTimeString()}
+              {msg.type === "incoming" && (
+                <ArrowDown
+                  size={12}
+                  className="shrink-0 mt-1 text-emerald-400"
+                />
+              )}
+              {msg.type === "outgoing" && (
+                <ArrowUp size={12} className="shrink-0 mt-1 text-blue-400" />
+              )}
+              <button
+                onClick={() => {
+                  setInput(msg.text);
+                }}
+                className="ml-2 opacity-50 hover:opacity-100"
+                title="Replay message"
+              >
+                ↺
+              </button>
+              <div
+                onClick={() => navigator.clipboard.writeText(msg.text)}
+                title="Click to copy"
+                className={`px-3 py-2 rounded-xl break-all leading-relaxed cursor-pointer ${
+                  msg.type === "outgoing"
+                    ? "rounded-tr-sm"
+                    : msg.type === "incoming"
+                      ? "rounded-tl-sm"
+                      : "rounded-lg w-full"
+                }`}
+                style={{
+                  background:
+                    msg.type === "outgoing"
+                      ? "var(--accent-subtle)"
+                      : msg.type === "incoming"
+                        ? "var(--bg-elevated)"
+                        : msg.type === "error"
+                          ? "rgba(239,68,68,0.1)"
+                          : "var(--bg-surface)",
+                  color:
+                    msg.type === "outgoing"
+                      ? "var(--accent)"
+                      : msg.type === "error"
+                        ? "var(--error)"
+                        : msg.type === "info"
+                          ? "var(--text-muted)"
+                          : "var(--text-primary)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                {msg.text}
+                <div className="text-[9px] mt-1 opacity-50">
+                  {new Date(msg.ts).toLocaleTimeString()}
+                  {msg.size && ` • ${msg.size} B`}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
         <div ref={messagesEndRef} />
       </div>
 
@@ -314,6 +444,13 @@ export default function WSPanel({ tab }) {
           Send
         </button>
       </div>
+      {showSaveModal && (
+        <SaveRequestModal
+          tab={tab}
+          requestType="websocket"
+          onClose={() => setShowSaveModal(false)}
+        />
+      )}
     </div>
   );
 }

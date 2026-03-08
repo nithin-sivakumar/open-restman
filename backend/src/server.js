@@ -8,6 +8,7 @@ import fetch from "node-fetch";
 import FormData from "form-data";
 import path from "path";
 import { fileURLToPath } from "url";
+import WebSocket from "ws";
 
 import { getDbEngine } from "./db/config.js";
 import { initDb } from "./db/index.js";
@@ -217,71 +218,64 @@ wss.on("connection", async (clientWs, req) => {
 
   clientWs.send(JSON.stringify({ type: "connecting", target: targetUrl }));
 
-  import("ws")
-    .then(({ default: WS }) => {
-      const targetWs = new WS.WebSocket(targetUrl);
-      targetWs.on("open", () => {
-        wsConnections.set(connectionId, { client: clientWs, target: targetWs });
-        clientWs.send(JSON.stringify({ type: "connected", target: targetUrl }));
-      });
-      targetWs.on("message", (data) => {
-        let message;
-        try {
-          message = data.toString();
-        } catch {
-          message = "[binary data]";
-        }
+  const targetWs = new WebSocket(targetUrl);
+  targetWs.on("open", () => {
+    wsConnections.set(connectionId, { client: clientWs, target: targetWs });
+    clientWs.send(JSON.stringify({ type: "connected", target: targetUrl }));
+  });
+  targetWs.on("message", (data) => {
+    let message;
+    try {
+      message = data.toString();
+    } catch {
+      message = "[binary data]";
+    }
+    clientWs.send(
+      JSON.stringify({
+        type: "message",
+        direction: "incoming",
+        data: message,
+        timestamp: Date.now(),
+      }),
+    );
+  });
+  targetWs.on("close", (code, reason) => {
+    clientWs.send(
+      JSON.stringify({
+        type: "disconnected",
+        code,
+        reason: reason.toString(),
+      }),
+    );
+    wsConnections.delete(connectionId);
+  });
+  targetWs.on("error", (err) => {
+    clientWs.send(JSON.stringify({ type: "error", message: err.message }));
+  });
+
+  clientWs.on("message", (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === "send" && targetWs && targetWs.readyState === 1) {
+        targetWs.send(msg.data);
         clientWs.send(
           JSON.stringify({
             type: "message",
-            direction: "incoming",
-            data: message,
+            direction: "outgoing",
+            data: msg.data,
             timestamp: Date.now(),
           }),
         );
-      });
-      targetWs.on("close", (code, reason) => {
-        clientWs.send(
-          JSON.stringify({
-            type: "disconnected",
-            code,
-            reason: reason.toString(),
-          }),
-        );
-        wsConnections.delete(connectionId);
-      });
-      targetWs.on("error", (err) => {
-        clientWs.send(JSON.stringify({ type: "error", message: err.message }));
-      });
+      }
+    } catch {
+      if (targetWs && targetWs.readyState === 1) targetWs.send(data.toString());
+    }
+  });
 
-      clientWs.on("message", (data) => {
-        try {
-          const msg = JSON.parse(data.toString());
-          if (msg.type === "send" && targetWs && targetWs.readyState === 1) {
-            targetWs.send(msg.data);
-            clientWs.send(
-              JSON.stringify({
-                type: "message",
-                direction: "outgoing",
-                data: msg.data,
-                timestamp: Date.now(),
-              }),
-            );
-          }
-        } catch {
-          if (targetWs && targetWs.readyState === 1)
-            targetWs.send(data.toString());
-        }
-      });
-
-      clientWs.on("close", () => {
-        if (targetWs) targetWs.close();
-        wsConnections.delete(connectionId);
-      });
-    })
-    .catch((err) => {
-      clientWs.send(JSON.stringify({ type: "error", message: err.message }));
-    });
+  clientWs.on("close", () => {
+    if (targetWs) targetWs.close();
+    wsConnections.delete(connectionId);
+  });
 });
 
 const PORT = process.env.PORT || 4000;

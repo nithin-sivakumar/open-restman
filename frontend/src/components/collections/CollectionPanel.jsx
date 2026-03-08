@@ -1258,6 +1258,7 @@ export default function CollectionPanel() {
           ],
       auth: req.auth || { type: "none" },
       type: req.type || "http",
+      wsMessages: req.messages || [],
       collectionId: null, // will be linked if user saves again
       requestId: req.id,
       folderId: folderId,

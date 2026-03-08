@@ -154,7 +154,10 @@ export default function SaveRequestModal({ tab, onClose }) {
   const [selectedFolderId, setSelectedFolderId] = useState(
     tab.folderId || null,
   );
-  const [requestName, setRequestName] = useState(tab.name || "New Request");
+  const [requestName, setRequestName] = useState(
+    tab.name ||
+      (tab.type === "websocket" ? "WebSocket Session" : "New Request"),
+  );
   const [expandedCollections, setExpandedCollections] = useState({});
   const [newCollectionName, setNewCollectionName] = useState("");
   const [newCollectionColor, setNewCollectionColor] = useState("#6366f1");
@@ -180,20 +183,33 @@ export default function SaveRequestModal({ tab, onClose }) {
     if (!selectedCollectionId || !requestName.trim()) return;
     setSaving(true);
     try {
-      const requestData = {
-        id: tab.requestId || generateId(),
-        name: requestName.trim(),
-        method: tab.method,
-        url: tab.url || "",
-        headers: tab.headers || [],
-        params: tab.params || [],
-        bodyType: tab.bodyType || "none",
-        body: tab.body || "",
-        formFields: tab.formFields || [],
-        auth: tab.auth || { type: "none" },
-        type: tab.type || "http",
-        description: "",
-      };
+      let requestData;
+
+      if (tab.type === "websocket") {
+        requestData = {
+          id: tab.requestId || generateId(),
+          name: requestName.trim(),
+          type: "websocket",
+          url: tab.url || "",
+          messages: tab.wsMessages || [],
+          description: "",
+        };
+      } else {
+        requestData = {
+          id: tab.requestId || generateId(),
+          name: requestName.trim(),
+          method: tab.method,
+          url: tab.url || "",
+          headers: tab.headers || [],
+          params: tab.params || [],
+          bodyType: tab.bodyType || "none",
+          body: tab.body || "",
+          formFields: tab.formFields || [],
+          auth: tab.auth || { type: "none" },
+          type: tab.type || "http",
+          description: "",
+        };
+      }
 
       let updatedCollection;
 
@@ -309,7 +325,9 @@ export default function SaveRequestModal({ tab, onClose }) {
                   className="text-sm font-semibold"
                   style={{ color: "var(--text-primary)" }}
                 >
-                  Save Request
+                  {tab.type === "websocket"
+                    ? "Save WebSocket Session"
+                    : "Save Request"}
                 </h2>
                 <p
                   className="text-xs mt-0.5"
